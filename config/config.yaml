@@ -1,0 +1,6 @@
+Http:
+  ReadTimeout: 0s
+  ReadHeaderTimeout: 0s
+  WriteTimeout: 10s
+  IdleTimeout: 720s
+  MaxHeaderBytes: 524288
