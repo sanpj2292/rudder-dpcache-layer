@@ -70,7 +70,8 @@ func (lh *RdDistLockHandlerT) createMutex(lockKey string) (*concurrency.Mutex, *
 	if sessionErr != nil {
 		return nil, client, sessionErr
 	}
-	defer session.Close()
+	
+  defer session.Close()
 	mutex := concurrency.NewMutex(session, fmt.Sprintf(`/dlock-%v/`, lockKey))
 	return mutex, client, nil
 }

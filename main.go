@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
+	"os"
 	"strings"
 	"time"
 
+	"cloud.google.com/go/bigquery"
 	"github.com/gorilla/mux"
 	"github.com/rudderlabs/rudder-server/config"
 	"github.com/rudderlabs/rudder-server/utils/logger"
@@ -17,6 +18,7 @@ import (
 	"github.com/sanpj2292/rudder-dpcache-layer/etcd"
 	"github.com/tidwall/gjson"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/api/iterator"
 )
 
 // Reason for using the used redis-client
@@ -61,6 +63,10 @@ func main() {
 	Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	g, ctx := errgroup.WithContext(ctx)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "9800"
+	}
 	// go func() {
 	// 	c := make(chan os.Signal, 1)
 	// 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -70,7 +76,7 @@ func main() {
 
 	// Run(ctx)
 	g.Go(func() error {
-		return startWebHandler(ctx)
+		return startWebHandler(ctx, port)
 	})
 
 	err := g.Wait()
@@ -80,12 +86,13 @@ func main() {
 	}
 }
 
-func startWebHandler(ctx context.Context) error {
-	webPort := 9800
+func startWebHandler(ctx context.Context, webport string) error {
 	srvMux := mux.NewRouter()
-	srvMux.HandleFunc("/", standbyHealthHandler)
-	srvMux.HandleFunc("/health", standbyHealthHandler)
+	// srvMux.HandleFunc("/", standbyHealthHandler)
+	// srvMux.HandleFunc("/health", standbyHealthHandler)
 	srvMux.HandleFunc("/version", versionHandler)
+
+	srvMux.HandleFunc("/bqstream", HandleBqstream).Methods(http.MethodGet)
 
 	// cache APIs
 	srvMux.HandleFunc("/cache", func(w http.ResponseWriter, r *http.Request) {
@@ -164,7 +171,7 @@ func startWebHandler(ctx context.Context) error {
 	srvMux.HandleFunc("/dist/lock", HandleDistLock).Methods(http.MethodPost, http.MethodDelete)
 
 	srv := &http.Server{
-		Addr: ":" + strconv.Itoa(webPort),
+		// Addr: ":" + webport,
 		// Handler:           bugsnag.Handler(srvMux),
 		ReadTimeout:       ReadTimeout,
 		ReadHeaderTimeout: ReadHeaderTimeout,
@@ -177,8 +184,9 @@ func startWebHandler(ctx context.Context) error {
 		srv.Shutdown(context.Background())
 	}()
 
-	if err := http.ListenAndServe(":9800", srvMux); err != nil {
-		return fmt.Errorf("web server: %w", err)
+	if err := http.ListenAndServe(fmt.Sprintf(":%s", webport), srvMux); err != nil {
+		panic(err)
+		// return fmt.Errorf("web server: %w", err)
 	}
 	return nil
 }
@@ -240,4 +248,64 @@ func HandleDistLock(rw http.ResponseWriter, r *http.Request) {
 		panic(jsonErr)
 	}
 	Respond(rw, string(jsonRes), http.StatusOK)
+}
+
+func HandleBqstream(rw http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	ctx := context.Background()
+	qParams := []string{"projectId", "datasetId", "tableId"}
+	pkgLogger.Info("Inside BQStream method")
+	fmt.Println("Inside BQStream method")
+	qMap := make(map[string]string)
+	for _, param := range qParams {
+		value := query.Get(param)
+		if value == "" {
+			errMsg := fmt.Sprintf("%s field is not available", param)
+			pkgLogger.Fatal(errMsg)
+			Respond(rw, errMsg, http.StatusBadRequest)
+			return
+		}
+		qMap[param] = value
+	}
+	pkgLogger.Infof("Creating bigquery client with projectId as %s", qMap["projectId"])
+	bqClient, err := bigquery.NewClient(ctx, qMap["projectId"])
+	if err != nil {
+		pkgLogger.Errorf(`Error during BqClient creation operation: %+v`, err)
+		Respond(rw, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	bigQueryStr := fmt.Sprintf("select productId, count, productName from `%s.%s.%s` limit 10;",
+		qMap["projectId"], qMap["datasetId"], qMap["tableId"])
+	pkgLogger.Infof("Formed Query: %s", bigQueryStr)
+	fmt.Printf("Formed Query: %s\n", bigQueryStr)
+	bquery := bqClient.Query(bigQueryStr)
+	pkgLogger.Info("Trying to read the query for BigQuery")
+	it, err := bquery.Read(ctx)
+	if err != nil {
+		pkgLogger.Errorf(`Error after Query Read:- %+v`, err)
+		Respond(rw, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	pkgLogger.Infof(`Return from Read command: %+v`, it)
+	pkgLogger.Infof(`Number of Rows fetched : %+v\n`, it.TotalRows)
+	fmt.Println("Got the values from BigQuery successfully, processing it now.....")
+	var retStr string
+	for {
+		// var values bigquery.Value
+		var row []bigquery.Value
+		err := it.Next(&row)
+		if err == iterator.Done {
+			break
+		}
+		// valBytes, err = json.Marshal(&values)
+		// if err != nil {
+		// 	// TODO: Handle error.
+		// 	pkgLogger.Errorf(`%+v`, err)
+		// 	Respond(rw, err.Error(), http.StatusExpectationFailed)
+		// 	return
+		// }
+		retStr += fmt.Sprintf(`%+v`, row)
+	}
+	pkgLogger.Info("About to send out the response for BigQuery")
+	Respond(rw, retStr, http.StatusOK)
 }

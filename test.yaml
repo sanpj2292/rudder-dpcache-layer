@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: dpcache-layer-1
+  name: dpcache-layer-1
+  namespace: cache-layer
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: dpcache-layer-1
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: dpcache-layer-1
+    spec:
+      serviceAccountName: kubesvcact
+      containers:
+      - image: us-east1-docker.pkg.dev/rudder-sai/rudder-dpcache-layer/dpcache-layer@sha256:5689eff588b1ab6f913f8242b84ce48c4c4f138f8ea70bb075869670b499b5d1
+        imagePullPolicy: IfNotPresent
+        name: dpcache-layer-sha256-1
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30

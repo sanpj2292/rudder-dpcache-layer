@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    cloud.google.com/neg: '{"ingress":true}'
+  labels:
+    app: dpcache-layer-1
+  name: dpcache-layer-1-service
+spec:
+  externalTrafficPolicy: Cluster
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 9800
+  selector:
+    app: dpcache-layer-1
+  sessionAffinity: None
+  type: LoadBalancer
