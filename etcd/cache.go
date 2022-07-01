@@ -193,6 +193,7 @@ func (handler *EtcdCacheHandlerT) Delete(ctx context.Context, key string) (strin
 	return fmt.Sprintf(`Deleted: %v`, delRes.Deleted), nil
 }
 
+// Methods related to another OAuth implementaion
 func (handler *EtcdCacheHandlerT) FetchToken(ctx context.Context, oauthParams *OAuthFlowParams, workspaceToken string) (string, error) {
 	client, cliErr := handler.GetConnection()
 	if cliErr != nil {
