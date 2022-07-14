@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	"cloud.google.com/go/storage"
 	"github.com/gorilla/mux"
 	"github.com/rudderlabs/rudder-server/config"
 	"github.com/rudderlabs/rudder-server/utils/logger"
@@ -19,6 +20,7 @@ import (
 	"github.com/tidwall/gjson"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 )
 
 // Reason for using the used redis-client
@@ -93,6 +95,7 @@ func startWebHandler(ctx context.Context, webport string) error {
 	srvMux.HandleFunc("/version", versionHandler)
 
 	srvMux.HandleFunc("/bqstream", HandleBqstream).Methods(http.MethodGet)
+	srvMux.HandleFunc("/gcs", HandleGcs).Methods(http.MethodPost)
 
 	// cache APIs
 	srvMux.HandleFunc("/cache", func(w http.ResponseWriter, r *http.Request) {
@@ -308,4 +311,48 @@ func HandleBqstream(rw http.ResponseWriter, r *http.Request) {
 	}
 	pkgLogger.Info("About to send out the response for BigQuery")
 	Respond(rw, retStr, http.StatusOK)
+}
+
+func HandleGcs(rw http.ResponseWriter, r *http.Request) {
+	respData, err := io.ReadAll(r.Body)
+	defer r.Body.Close()
+	if err != nil {
+		pkgLogger.Fatalf(`[GCS] Problem in reading request body: %+v`, err)
+		Respond(rw, "[GCS] Problem in reading request body", http.StatusBadRequest)
+		return
+	}
+	projectId := gjson.GetBytes(respData, "projectId").String()
+
+	ctx := context.Background()
+	opts := []option.ClientOption{}
+	credEnv := strings.TrimSpace(config.GetEnv("GOOGLE_APPLICATION_CREDENTIALS", ""))
+	if credEnv != "" {
+		credentials := gjson.GetBytes(respData, "credentials").String()
+		opts = append(opts, option.WithCredentialsJSON([]byte(credentials)))
+	}
+	client, err := storage.NewClient(ctx, opts...)
+	if err != nil {
+		pkgLogger.Fatalf(`[GCS] Problem in client creation: %+v`, err)
+		Respond(rw, "[GCS] Problem in client creation", http.StatusBadRequest)
+		return
+	}
+	defer client.Close()
+	pkgLogger.Infof("[GCS] Before Buckets data-fetch for project: %+v", projectId)
+	var bucketNames []string
+	it := client.Buckets(ctx, projectId)
+	for {
+		battrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			pkgLogger.Fatalf(`[GCS] Problem while processing: %+v`, err)
+			Respond(rw, "[GCS] Problem while processing the gcs buckets data", http.StatusBadRequest)
+			return
+		}
+		bucketNames = append(bucketNames, battrs.Name)
+	}
+	pkgLogger.Infof("[GCS] After Buckets data-fetch for project: %+v", projectId)
+	pkgLogger.Infof("Buckets: %+v", bucketNames)
+	Respond(rw, strings.Join(bucketNames, ", "), http.StatusOK)
 }
