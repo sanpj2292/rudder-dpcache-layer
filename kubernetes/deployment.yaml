@@ -84,6 +84,7 @@ metadata:
   namespace: sankeerth
 spec:
   replicas: 1
+  serviceAccountName: gke-wrkload-svcact
   selector:
     matchLabels:
       app: wrkload-poc-1
