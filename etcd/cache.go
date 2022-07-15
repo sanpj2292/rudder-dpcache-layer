@@ -43,11 +43,12 @@ type EtcdCache interface {
 }
 
 type OAuthFlowParams struct {
-	HasExpired  bool   `json:"hasExpired"`
-	AccessToken string `json:"accessToken"`
-	RequestId   string `json:"requestId"`
-	RequestType string `json:"requestType"`
-	WorkspaceId string `json:"workspaceId"`
+	HasExpired  bool            `json:"hasExpired"`
+	Secret      json.RawMessage `json:"secret"`
+	RequestId   string          `json:"requestId"`
+	RequestType string          `json:"requestType"`
+	WorkspaceId string          `json:"workspaceId"`
+	DestName    string          `json:"destName"`
 }
 
 type ControlPlaneRequestT struct {
@@ -61,8 +62,8 @@ type ControlPlaneRequestT struct {
 }
 
 type OAuthTokenBodyParams struct {
-	HasExpired   bool   `json:"hasExpired"`
-	ExpiredToken string `json:"expiredToken"`
+	HasExpired    bool   `json:"hasExpired"`
+	ExpiredSecret string `json:"expiredSecret"`
 }
 
 func NewEtcdCacheHandler() *EtcdCacheHandlerT {
@@ -195,35 +196,35 @@ func (handler *EtcdCacheHandlerT) Delete(ctx context.Context, key string) (strin
 
 // Methods related to another OAuth implementaion
 func (handler *EtcdCacheHandlerT) FetchToken(ctx context.Context, oauthParams *OAuthFlowParams, workspaceToken string) (string, error) {
-	client, cliErr := handler.GetConnection()
-	if cliErr != nil {
-		return "", cliErr
-	}
-	defer client.Close()
-	session, sessionErr := concurrency.NewSession(client)
-	if sessionErr != nil {
-		return "", sessionErr
-	}
-	defer session.Close()
-	mutex := concurrency.NewMutex(session, fmt.Sprintf(`/dlock-%v`, oauthParams.RequestId))
-	var cacheToken string
-	var getErr error
-	if lockErr := mutex.TryLock(ctx); lockErr != nil {
-		if cacheToken, getErr = handler.Get(ctx, oauthParams.RequestId); getErr != nil {
-			mutex.Unlock(ctx)
-			return "", getErr
-		}
-		if cacheToken != "" && cacheToken != oauthParams.AccessToken {
-			mutex.Unlock(ctx)
-			return cacheToken, nil
-		}
-	}
+	// client, cliErr := handler.GetConnection()
+	// if cliErr != nil {
+	// 	return "", cliErr
+	// }
+	// defer client.Close()
+	// session, sessionErr := concurrency.NewSession(client)
+	// if sessionErr != nil {
+	// 	return "", sessionErr
+	// }
+	// defer session.Close()
+	// mutex := concurrency.NewMutex(session, fmt.Sprintf(`/dlock-%v`, oauthParams.RequestId))
+	// var cacheToken string
+	// var getErr error
+	// if lockErr := mutex.TryLock(ctx); lockErr != nil {
+	// 	if cacheToken, getErr = handler.Get(ctx, oauthParams.RequestId); getErr != nil {
+	// 		mutex.Unlock(ctx)
+	// 		return "", getErr
+	// 	}
+	// 	if cacheToken != "" && cacheToken != oauthParams.AccessToken {
+	// 		mutex.Unlock(ctx)
+	// 		return cacheToken, nil
+	// 	}
+	// }
 	logger.Log.Info("Refresh Token Request Starts")
 	// Actual TokenFetch from config-backend
-	refreshUrl := fmt.Sprintf("%s/dest/workspaces/%s/accounts/%s/token", getConfigBEUrl(), oauthParams.WorkspaceId, oauthParams.RequestId)
+	refreshUrl := fmt.Sprintf("%s/destination/workspaces/%s/accounts/%s/token", getConfigBEUrl(), oauthParams.WorkspaceId, oauthParams.RequestId)
 	res, err := json.Marshal(&OAuthTokenBodyParams{
-		HasExpired:   oauthParams.HasExpired,
-		ExpiredToken: oauthParams.AccessToken,
+		HasExpired:    oauthParams.HasExpired,
+		ExpiredSecret: string(oauthParams.Secret),
 	})
 	if err != nil {
 		panic(err)
@@ -233,12 +234,12 @@ func (handler *EtcdCacheHandlerT) FetchToken(ctx context.Context, oauthParams *O
 		Url:         refreshUrl,
 		ContentType: "application/json; charset=utf-8",
 		Body:        string(res),
-		destName:    "BQSTREAM",
+		destName:    oauthParams.DestName,
 		RequestType: oauthParams.RequestType,
 	}
 	_, retVal := handler.cpApiCall(refreshCpReq)
-	mutex.Unlock(ctx)
-	handler.Put(ctx, oauthParams.RequestId, retVal, 0)
+	// mutex.Unlock(ctx)
+	// handler.Put(ctx, oauthParams.RequestId, retVal, 0)
 	return retVal, nil
 }
 
