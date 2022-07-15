@@ -84,7 +84,6 @@ metadata:
   namespace: sankeerth
 spec:
   replicas: 1
-  serviceAccountName: gke-wrkload-svcact
   selector:
     matchLabels:
       app: wrkload-poc-1
@@ -98,6 +97,7 @@ spec:
       labels:
         app: wrkload-poc-1
     spec:
+      serviceAccountName: gke-wrkload-svcact
       containers:
         - image: gcr.io/san-wrkload/github_sanpj2292_rudder-dpcache-layer
           imagePullPolicy: IfNotPresent
